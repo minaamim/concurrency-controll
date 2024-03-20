@@ -24,14 +24,15 @@ class Account(
 //        return true
 //    }
 
-    fun deposit(amount: Long) {
+    fun deposit(amount: Long): Long {
         balance += amount
+        return balance
     }
 
-    fun withdraw(amount: Long): Boolean {
+    fun withdraw(amount: Long): Long {
         mayWithdraw(amount)
         balance -= amount
-        return true
+        return balance
     }
 
     private fun mayWithdraw(amount: Long) {

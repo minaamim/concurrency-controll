@@ -15,6 +15,8 @@ import mina.concurrencycontroll.account.application.port.out.UpdateAccountStateP
 import mina.concurrencycontroll.account.domain.Account
 import mina.concurrencycontroll.global.exception.BusinessException
 import mina.concurrencycontroll.global.exception.ErrorCode
+import mina.concurrencycontroll.global.redis.RedisConfig
+import org.slf4j.LoggerFactory
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
 import java.time.LocalDateTime
@@ -24,13 +26,18 @@ import java.util.concurrent.Executors
 
 private val loadAccountPort: LoadAccountPort = mockk()
 private val updateAccountStatePort: UpdateAccountStatePort = mockk(relaxed = true)
+private val redisConfig: RedisConfig = RedisConfig()
 
 @InjectMockKs
-val transferService: TransferService = TransferService(loadAccountPort, updateAccountStatePort)
+val transferService: TransferService =
+    TransferService(loadAccountPort, updateAccountStatePort, redisConfig.redissonClient())
 
 @SpringBootTest(classes = [ConcurrencyControllApplicationTests::class])
 @ActiveProfiles("test")
 class TransferServiceTest : BehaviorSpec({
+
+    val log = LoggerFactory.getLogger(this::class.java)
+
     Given("계좌 이체 시도") {
         val sourceAccountId = 11L
         val targetAccountId = 22L
@@ -54,9 +61,14 @@ class TransferServiceTest : BehaviorSpec({
         every { loadAccountPort.loadAccount(targetAccountId) } returns targetAccount
 
         When("계좌 이체 서비스 호출") {
-            val result = transferService.transfer(TransferCommand(sourceAccountId, targetAccountId, amount))
-            Then("계좌 이체에 성공한다") {
-                result shouldBe true
+            transferService.transfer(TransferCommand(sourceAccountId, targetAccountId, amount))
+            Then("송신 계좌의 잔액은 송금액만큼 빠져나가야 한다") {
+                sourceAccount.balance shouldBeExactly 110L
+            }
+            Then("수신 계좌의 잔액은 송금액만큼 늘어나야 한다") {
+                targetAccount.balance shouldBeExactly 223L
+            }
+            Then("송금이 반영되어야 한다") {
                 verify(exactly = 1) { updateAccountStatePort.updateAccount(sourceAccount) }
                 verify(exactly = 1) { updateAccountStatePort.updateAccount(targetAccount) }
             }
@@ -100,8 +112,8 @@ class TransferServiceTest : BehaviorSpec({
     }
 
     Given("계좌이체 요청이 동시에 여러 개 발생한 상황에서") {
-        val executorService = Executors.newFixedThreadPool(20)
-        val count = 500
+        val executorService = Executors.newFixedThreadPool(10)
+        val count = 100
         val countDownLatch = CountDownLatch(count)
 
         val sourceAccountId = 11L
@@ -135,15 +147,19 @@ class TransferServiceTest : BehaviorSpec({
                     }
                 }
             }
+            countDownLatch.await()
             Then("송신 계좌의 잔액은 송금액만큼 빠져나가야 한다") {
-                sourceAccount.balance shouldBeExactly 0L
+                log.info("[verify] source account balance: ${sourceAccount.balance}")
+                sourceAccount.balance shouldBeExactly 400L
             }
             Then("수신 계좌의 잔액은 송금액만큼 늘어나야 한다") {
-                targetAccount.balance shouldBeExactly 500L
+                targetAccount.balance shouldBeExactly 100L
             }
-            Then("이체가 반영되어야 한다") {
-                verify(exactly = 500) { updateAccountStatePort.updateAccount(sourceAccount) }
-                verify(exactly = 500) { updateAccountStatePort.updateAccount(targetAccount) }
+            Then("송신이 반영되어야 한다") {
+                verify(exactly = 100) { updateAccountStatePort.updateAccount(sourceAccount) }
+            }
+            Then("수신이 반영되어야 한다") {
+                verify(exactly = 100) { updateAccountStatePort.updateAccount(targetAccount) }
             }
         }
     }

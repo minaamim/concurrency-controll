@@ -15,6 +15,7 @@ import mina.concurrencycontroll.account.application.port.out.UpdateAccountStateP
 import mina.concurrencycontroll.account.domain.Account
 import mina.concurrencycontroll.global.exception.BusinessException
 import mina.concurrencycontroll.global.exception.ErrorCode
+import mina.concurrencycontroll.global.redis.RedisConfig
 import org.slf4j.LoggerFactory
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.test.context.ActiveProfiles
@@ -24,9 +25,11 @@ import java.util.concurrent.Executors
 
 private val loadAccountPort: LoadAccountPort = mockk()
 private val updateAccountStatePort: UpdateAccountStatePort = mockk(relaxed = true)
+private val redisConfig: RedisConfig = RedisConfig()
 
 @InjectMockKs
-val depositService: DepositService = DepositService(loadAccountPort, updateAccountStatePort)
+val depositService: DepositService =
+    DepositService(loadAccountPort, updateAccountStatePort, redisConfig.redissonClient())
 
 @SpringBootTest(classes = [ConcurrencyControllApplicationTests::class])
 @ActiveProfiles("test")
@@ -107,7 +110,7 @@ class DepositServiceTest : BehaviorSpec({
 
             Then("결과 확인") {
                 account.balance shouldBeEqual 500L
-                verify(exactly = 100) { updateAccountStatePort.updateAccount(account) }
+                verify(exactly = 500) { updateAccountStatePort.updateAccount(account) }
             }
         }
     }
